@@ -1,0 +1,202 @@
+# CDOCKER: a concencus molecular docking tool
+
+<p align="center">
+  <img alt="cover" src="assets/cover.png" style="max-width:100%; height:auto;" />
+</p>
+
+<!-- Badges (replace `<USER>` and `<REPO>` with your GitHub user/org and repository name) -->
+
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+[![GitHub tag](https://img.shields.io/github/v/tag/<USER>/<REPO>?sort=semver)](https://github.com/<USER>/<REPO>/tags)
+[![GitHub Actions CI](https://github.com/<USER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<USER>/<REPO>/actions)
+[![GitHub Actions Docs](https://github.com/<USER>/<REPO>/actions/workflows/docs.yml/badge.svg)](https://github.com/<USER>/<REPO>/actions)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/<USER>/<REPO>/HEAD)
+[![Anaconda (version)](https://anaconda.org/<ANACONDA_USER>/<PKG>/badges/version.svg)](https://anaconda.org/<ANACONDA_USER>/<PKG>)
+
+[![GitHub closed PRs](https://img.shields.io/github/issues-closed-raw/<USER>/<REPO>?label=closed%20PRs)](https://github.com/<USER>/<REPO>/pulls?q=is%3Apr+is%3Aclosed)
+[![GitHub open PRs](https://img.shields.io/github/issues-pr/<USER>/<REPO>?label=open%20PRs)](https://github.com/<USER>/<REPO>/pulls)
+[![GitHub closed issues](https://img.shields.io/github/issues-closed/<USER>/<REPO>?label=closed%20issues)](https://github.com/<USER>/<REPO>/issues?q=is%3Aissue+is%3Aclosed)
+[![GitHub open issues](https://img.shields.io/github/issues/<USER>/<REPO>?label=open%20issues)](https://github.com/<USER>/<REPO>/issues)
+
+> A lightweight **bash-based** *consensus molecular docking* workflow combining AutoDock Vina (v1.2.3) and AutoDock4 search methods, plus tools for conformer generation and post-processing.
+
+---
+
+## Table of Contents
+
+* [Highlights](#highlights)
+* [Quick demo (one-liner)](#quick-demo-one-liner)
+* [Requirements](#requirements)
+* [Repository layout & Inputs](#repository-layout--inputs)
+* [Quick start](#quick-start)
+* [Pipeline overview](#pipeline-overview)
+* [Outputs](#outputs)
+* [Sample `gridsize_INPUT`](#sample-gridsize_input)
+* [License & Citation](#license--citation)
+* [Contributing](#contributing)
+* [Contact](#contact)
+
+---
+
+## Highlights
+
+* Runs **five docking strategies per ligand** (Vina with two scoring functions and AutoDock4 with multiple search algorithms).
+* Minimal user interaction: provide a SMILES text file and a receptor `.pdbqt` plus grid definition and run `docking.sh`.
+* Includes conformer generation (Balloon), conversion to `.pdbqt`, flexible docking workflows, and summary/analysis scripts.
+
+---
+
+## Quick demo (one-liner)
+
+```bash
+# From repo root (after populating INPUTS and installing required tools)
+./docking.sh
+```
+
+---
+
+## Requirements
+
+* Linux x86\_64 (tested on Ubuntu-like environments)
+* Bash (POSIX shell)
+* AutoDock Vina v1.2.3
+* AutoDock4 / AD4 utilities (ADFrun / autogrid4)
+* MGLTools (for `prepare_*` conversions)
+* Balloon (for conformer generation)
+* Standard Unix utilities: `awk`, `sed`, `perl` (some helper scripts rely on them)
+
+> See the `tools/` (or `third_party/`) folder to keep 3rd-party binaries out of version control. The repository expects a specific layout (described below).
+
+---
+
+## Repository layout & Inputs
+
+```
+<repo>/
+├─ codes/                 # scripts 01 to 17 (pipeline steps)
+├─ INPUTS/                # put your input files here
+│  ├─ molecules.smi       # single text file containing SMILES strings
+│  ├─ receptor.pdbqt      # receptor prepared in PDBQT format
+│  └─ gridsize_INPUT      # grid definition (see sample below)
+├─ ADFRsuite-1.1dev/      # AutoDock tools (placed by user)
+├─ mgltools_x86_64Linux2_1.5.7/  # MGLTools (placed by user)
+├─ COMFORMERS/            # generated conformers (.mol2/.pdbqt)
+├─ DOCKING/               # docking outputs
+└─ docking.sh             # top-level entry point
+```
+
+### What to place in `INPUTS/`
+
+* `molecules.smi` — a plain text file containing one or more SMILES strings. **Do not include stereochemistry** (Balloon can have trouble with certain stereodescriptors). Separate molecules with a `.` if you rely on the current splitter behaviour.
+* `receptor.pdbqt` — receptor file in PDBQT format.
+* `gridsize_INPUT` — the grid box parameters (see sample section).
+
+---
+
+## Quick start
+
+1. Place required third-party tools under the expected folders (see repository layout).
+2. Populate `INPUTS/` with `molecules.smi`, `receptor.pdbqt`, and `gridsize_INPUT`.
+3. Make scripts executable:
+
+```bash
+chmod +x codes/*.sh
+chmod +x docking.sh
+```
+
+4. Launch:
+
+```bash
+./docking.sh
+```
+
+> The scripts will create `COMFORMERS/`, `DOCKING/` and summary files automatically (relative to where the pipeline is executed).
+
+---
+
+## Pipeline overview (what each step does)
+
+This repository uses a numbered set of scripts (01–17). High-level mapping:
+
+1. **01\_smiles** — split SMILES text into individual `.smi` files.
+2. **02\_Conformers** — generate 3D conformers with Balloon → `.mol2` files.
+3. **03\_splitter** — split multi-conformer `.mol2` into `SMILE{i}_split*.mol2`.
+4. **04\_transformer** — add hydrogens, set rotatable bonds, convert `.mol2` → `.pdbqt`.
+5. **05\_gridtransformer.sh** — normalize/adapt grid coordinates for compatibility.
+6. **06\_docking\_autodockvina\_vina.sh** — dock with AutoDock Vina (vina scoring).
+7. **07\_Summerizer\_ADV\_vina.sh** — summarize Vina outputs.
+8. **08\_docking\_autodockvina\_vinardo.sh** — dock with Vinardo scoring.
+9. **09\_Summerizer\_ADV\_vinardo.sh** — summarize Vinardo outputs.
+10. **10\_autogrid4.sh** — precompute AD4 grids for atom-type interactions.
+    11–13. **Specifiers.sh** — generate AD4 `.dpf` input files for GA, LGA, LS.
+11. **14\_AD4\_docker.sh** — run AD4 docking jobs for all conformers and search methods.
+12. **15\_AD4\_Summerizer.sh** — summarize AD4 results.
+13. **16\_Organiser.sh** — merge ADV and AD4 summaries into a consolidated file.
+14. **17\_Data\_analyser.sh** — perform final analysis on merged results.
+
+---
+
+## Outputs
+
+* `DOCKING/ADV_vina/` and `DOCKING/ADV_vinardo/` — Vina docking outputs and logs.
+* `DOCKING/AD4/` — AutoDock4 docking outputs.
+* Summaries: `*_summary.csv` (human- and machine-readable tables used by `Data_analyser`).
+* Analysis: final merged `results_*.csv` and plots (if enabled).
+
+---
+
+## Sample `gridsize_INPUT`
+
+```
+5ek0
+spacing    0.372
+npts       44 44 44
+center    -48.776 -28.363 3.617
+```
+
+---
+
+## License & Citation
+
+This project is licensed under **Creative Commons Attribution 4.0 (CC BY 4.0)**. To add a DOI/badge for a released snapshot (e.g., via Zenodo) add the DOI badge at the top of this README:
+
+```markdown
+[![DOI](https://zenodo.org/badge/DOI:10.5281/zenodo.<your-doi-here>.svg)](https://doi.org/10.5281/zenodo.<your-doi-here>)
+```
+
+If you want to publish and mint a DOI for the repository, consider creating a release and linking the release to Zenodo (see Zenodo docs).
+
+---
+
+## Contributing
+
+Contributions are welcome! Suggested workflow:
+
+1. Fork the repo.
+2. Create a feature branch.
+3. Add tests (if appropriate) and documentation for changes.
+4. Open a pull request describing the change.
+
+Please follow best practices for reproducibility: avoid committing large binaries and include versioned dependencies.
+
+---
+
+## Tips & troubleshooting
+
+* If Balloon fails on a SMILES string, try simplifying the input (remove stereochemistry or unusual markers) and re-run generation.
+* Ensure that `receptor.pdbqt` and ligand `.pdbqt` files use the **same atom typing conventions** (MGLTools/AutoDock types) to avoid mismatched grids.
+* Keep third-party binaries in `third_party/` and add a `README.tools` describing where to download them.
+
+---
+
+## Contact
+
+If something breaks or you want features, open an issue or contact the maintainer: `<your-email-or-github-handle>`.
+
+---
+
+*If you want, I can also:*
+
+* generate a ready-to-drop `assets/cover.png`-friendly header (optimised size/ratio),
+* produce exact badge URLs filled with your GitHub username and repository name,
+* convert this README to reStructuredText or add a short `docs/` website (GitHub Pages) with step-by-step examples.
